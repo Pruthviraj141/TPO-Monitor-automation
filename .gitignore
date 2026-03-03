@@ -1,0 +1,54 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+env/
+pyvenv.cfg
+pip-wheel-metadata/
+
+# Environment files / secrets
+.env
+*.env
+
+# Editor / IDE
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Playwright artifacts
+.playwright/
+playwright-report/
+trace.zip
+
+# Test / coverage / logs
+.pytest_cache/
+coverage.xml
+*.log
+logs/
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.swp
+*~
+*.tmp
+
+# Test artifacts / dumps
+screenshots/
+page_after_login.html
+after_login.png
