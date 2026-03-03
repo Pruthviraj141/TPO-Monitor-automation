@@ -56,19 +56,19 @@ def scrape_companies():
 
     with sync_playwright() as p:
         try:
-            browser = p.chromium.launch(headless=False, slow_mo=100)
+            browser = p.chromium.launch(headless=True)
             page = browser.new_page()
 
             # ===================== STEP 1: LOGIN =====================
             print("[STEP 1] Opening login page...")
             # Only wait for domcontentloaded — the SPA renders after JS loads
-            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
+            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=120000)
             safe_check(page.url)
             print(f"  Page loaded. URL = {page.url}")
 
             # Wait for the text input to appear (Vuetify renders it dynamically)
             print("  Waiting for username input to render...")
-            page.wait_for_selector("input[type='text']", state="visible", timeout=30000)
+            page.wait_for_selector("input[type='text']", state="visible", timeout=60000)
             print("  Username input found.")
 
             # Extra wait for Vue to finish hydrating
@@ -118,12 +118,12 @@ def scrape_companies():
 
             # ===================== STEP 2: GO TO COMPANY PAGE (same tab) =====================
             print("[STEP 2] Navigating to company page...")
-            page.goto(COMPANY_URL, wait_until="domcontentloaded", timeout=60000)
+            page.goto(COMPANY_URL, wait_until="domcontentloaded", timeout=120000)
             safe_check(page.url)
             print(f"  URL = {page.url}")
 
             print("  Waiting for company cards...")
-            page.wait_for_selector(".v-card", state="visible", timeout=30000)
+            page.wait_for_selector(".v-card", state="visible", timeout=60000)
             page.wait_for_timeout(3000)  # let all cards render
             print("[STEP 2] Company page loaded.\n")
 
