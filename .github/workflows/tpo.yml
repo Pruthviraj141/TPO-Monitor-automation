@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "30 5 * * *"   # Runs at 11:00 AM IST (05:30 UTC)
-    - cron: "30 10 * * *"   # Runs at 4:00 PM IST (10:30 UTC)
+    - cron: "50 10 * * *"   # Runs at 4:20 PM IST (10:50 UTC)
 
 jobs:
   run-script:
