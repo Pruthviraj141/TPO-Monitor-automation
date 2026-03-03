@@ -81,6 +81,7 @@ def scrape_companies():
                     "--disable-setuid-sandbox",
                     "--disable-dev-shm-usage",
                     "--disable-gpu",
+                    "--disable-blink-features=AutomationControlled",
                 ],
             )
             context = browser.new_context(
@@ -90,7 +91,40 @@ def scrape_companies():
                     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 ),
             )
+
+            # --- Stealth: mask headless fingerprints BEFORE any page loads ---
+            context.add_init_script("""
+                // Hide webdriver flag
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                });
+
+                // Fake chrome runtime
+                window.chrome = { runtime: {} };
+
+                // Fake plugins (headless has 0)
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5],
+                });
+
+                // Fake languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en'],
+                });
+
+                // Fake permissions API
+                const origQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (params) =>
+                    params.name === 'notifications'
+                        ? Promise.resolve({ state: Notification.permission })
+                        : origQuery(params);
+            """)
+
             page = context.new_page()
+
+            # Log all JS console messages & errors for debugging
+            page.on("console", lambda msg: print(f"  [CONSOLE {msg.type}] {msg.text}"))
+            page.on("pageerror", lambda err: print(f"  [PAGE ERROR] {err}"))
 
             # ===================== STEP 1: LOGIN =====================
             print("[STEP 1] Opening login page...")
@@ -105,10 +139,30 @@ def scrape_companies():
             except Exception:
                 print("  Network idle timed out — continuing anyway.")
 
-            # Extra buffer for Vue to mount
-            page.wait_for_timeout(5000)
+            # Wait for Vue to actually mount — check DOM for any <input>
+            print("  Waiting for Vue to mount (checking for input elements)...")
+            try:
+                page.wait_for_function(
+                    "() => document.querySelectorAll('input').length > 0",
+                    timeout=60000,
+                )
+                print("  Vue mounted — inputs detected in DOM.")
+            except Exception:
+                # If still nothing, dump the raw HTML for debugging
+                debug_dump(page, "vue-not-mounted")
+                raw_html = page.content()
+                print(f"  [DEBUG] Page HTML length: {len(raw_html)}")
+                print(f"  [DEBUG] Has <input>: {'<input' in raw_html}")
+                print(f"  [DEBUG] Has v-app: {'v-app' in raw_html}")
+                print(f"  [DEBUG] Has #app: {'id=\"app\"' in raw_html}")
+                raise Exception(
+                    "Vue app did not mount — no input elements appeared after 60s. "
+                    "Check debug/vue-not-mounted.png and .html"
+                )
 
-            # Try multiple selectors — Vuetify inputs may not have type='text'
+            page.wait_for_timeout(2000)
+
+            # Now find the username input with multiple selectors
             INPUT_SELECTORS = [
                 "input[type='text']",
                 "input[type='email']",
@@ -122,7 +176,7 @@ def scrape_companies():
             username_input = None
             for sel in INPUT_SELECTORS:
                 try:
-                    page.wait_for_selector(sel, state="visible", timeout=10000)
+                    page.wait_for_selector(sel, state="visible", timeout=5000)
                     username_input = sel
                     print(f"  Username input found with selector: {sel}")
                     break
