@@ -151,10 +151,13 @@ def scrape_companies():
                 # If still nothing, dump the raw HTML for debugging
                 debug_dump(page, "vue-not-mounted")
                 raw_html = page.content()
+                has_input = "<input" in raw_html
+                has_vapp = "v-app" in raw_html
+                has_app_id = 'id="app"' in raw_html
                 print(f"  [DEBUG] Page HTML length: {len(raw_html)}")
-                print(f"  [DEBUG] Has <input>: {'<input' in raw_html}")
-                print(f"  [DEBUG] Has v-app: {'v-app' in raw_html}")
-                print(f"  [DEBUG] Has #app: {'id=\"app\"' in raw_html}")
+                print(f"  [DEBUG] Has <input>: {has_input}")
+                print(f"  [DEBUG] Has v-app: {has_vapp}")
+                print(f"  [DEBUG] Has #app: {has_app_id}")
                 raise Exception(
                     "Vue app did not mount — no input elements appeared after 60s. "
                     "Check debug/vue-not-mounted.png and .html"
