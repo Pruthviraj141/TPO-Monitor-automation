@@ -50,5 +50,6 @@ Thumbs.db
 
 # Test artifacts / dumps
 screenshots/
+debug/
 page_after_login.html
 after_login.png

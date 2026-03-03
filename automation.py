@@ -27,6 +27,24 @@ load_dotenv()
 LOGIN_URL = "https://tpo.vierp.in/"
 COMPANY_URL = "https://tpo.vierp.in/apply_company"
 ALLOWED_BASE = "https://tpo.vierp.in"
+DEBUG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug")
+
+
+def debug_dump(page, label="debug"):
+    """Save screenshot + HTML for debugging CI failures."""
+    os.makedirs(DEBUG_DIR, exist_ok=True)
+    try:
+        page.screenshot(path=os.path.join(DEBUG_DIR, f"{label}.png"), full_page=True)
+        print(f"  [DEBUG] Screenshot saved: debug/{label}.png")
+    except Exception as e:
+        print(f"  [DEBUG] Screenshot failed: {e}")
+    try:
+        html = page.content()
+        with open(os.path.join(DEBUG_DIR, f"{label}.html"), "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"  [DEBUG] HTML saved: debug/{label}.html")
+    except Exception as e:
+        print(f"  [DEBUG] HTML dump failed: {e}")
 
 
 def safe_check(url):
@@ -56,47 +74,112 @@ def scrape_companies():
 
     with sync_playwright() as p:
         try:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+            context = browser.new_context(
+                viewport={"width": 1280, "height": 720},
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ),
+            )
+            page = context.new_page()
 
             # ===================== STEP 1: LOGIN =====================
             print("[STEP 1] Opening login page...")
-            # Only wait for domcontentloaded — the SPA renders after JS loads
-            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=120000)
+            page.goto(LOGIN_URL, wait_until="load", timeout=120000)
             safe_check(page.url)
-            print(f"  Page loaded. URL = {page.url}")
+            print(f"  Page loaded (load event). URL = {page.url}")
 
-            # Wait for the text input to appear (Vuetify renders it dynamically)
+            # Wait for network to settle so Vue/Vuetify JS bundles finish
+            try:
+                page.wait_for_load_state("networkidle", timeout=30000)
+                print("  Network idle reached.")
+            except Exception:
+                print("  Network idle timed out — continuing anyway.")
+
+            # Extra buffer for Vue to mount
+            page.wait_for_timeout(5000)
+
+            # Try multiple selectors — Vuetify inputs may not have type='text'
+            INPUT_SELECTORS = [
+                "input[type='text']",
+                "input[type='email']",
+                ".v-text-field input",
+                ".v-input input",
+                "input:not([type='password']):not([type='hidden'])",
+                "input",
+            ]
+
             print("  Waiting for username input to render...")
-            page.wait_for_selector("input[type='text']", state="visible", timeout=60000)
-            print("  Username input found.")
+            username_input = None
+            for sel in INPUT_SELECTORS:
+                try:
+                    page.wait_for_selector(sel, state="visible", timeout=10000)
+                    username_input = sel
+                    print(f"  Username input found with selector: {sel}")
+                    break
+                except Exception:
+                    print(f"    Selector '{sel}' not found, trying next...")
 
-            # Extra wait for Vue to finish hydrating
-            page.wait_for_timeout(3000)
+            if not username_input:
+                debug_dump(page, "login-page-no-input")
+                raise Exception(
+                    "Could not find any username input on the login page. "
+                    "Check debug/login-page-no-input.png and .html"
+                )
+
+            # Extra wait for Vue hydration
+            page.wait_for_timeout(2000)
 
             username = os.environ["TPO_USERNAME"]
             password = os.environ["TPO_PASSWORD"]
 
             # Use native JS setter to fill Vuetify inputs (bypasses fill timeout)
             print("  Filling username...")
-            page.evaluate("""(val) => {
-                const el = document.querySelector("input[type='text']");
-                if (!el) throw new Error('username input not found');
+            page.evaluate("""(args) => {
+                const [val, sel] = args;
+                const el = document.querySelector(sel);
+                if (!el) throw new Error('username input not found with: ' + sel);
                 const setter = Object.getOwnPropertyDescriptor(
                     window.HTMLInputElement.prototype, 'value').set;
                 setter.call(el, val);
                 el.dispatchEvent(new Event('input', { bubbles: true }));
-            }""", username)
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""", [username, username_input])
 
             print("  Filling password...")
-            page.evaluate("""(val) => {
-                const el = document.querySelector("input[type='password']");
-                if (!el) throw new Error('password input not found');
+            # Try multiple password selectors
+            PWD_SELECTORS = [
+                "input[type='password']",
+                ".v-text-field input[type='password']",
+            ]
+            pwd_sel = None
+            for sel in PWD_SELECTORS:
+                if page.query_selector(sel):
+                    pwd_sel = sel
+                    break
+            if not pwd_sel:
+                debug_dump(page, "login-page-no-password")
+                raise Exception("Could not find password input.")
+
+            page.evaluate("""(args) => {
+                const [val, sel] = args;
+                const el = document.querySelector(sel);
+                if (!el) throw new Error('password input not found with: ' + sel);
                 const setter = Object.getOwnPropertyDescriptor(
                     window.HTMLInputElement.prototype, 'value').set;
                 setter.call(el, val);
                 el.dispatchEvent(new Event('input', { bubbles: true }));
-            }""", password)
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }""", [password, pwd_sel])
 
             page.wait_for_timeout(1000)
 
@@ -114,16 +197,30 @@ def scrape_companies():
                 page.wait_for_timeout(5000)
 
             print(f"  Post-login URL = {page.url}")
+            debug_dump(page, "post-login")
             print("[STEP 1] Login done.\n")
 
             # ===================== STEP 2: GO TO COMPANY PAGE (same tab) =====================
             print("[STEP 2] Navigating to company page...")
-            page.goto(COMPANY_URL, wait_until="domcontentloaded", timeout=120000)
+            page.goto(COMPANY_URL, wait_until="load", timeout=120000)
             safe_check(page.url)
             print(f"  URL = {page.url}")
 
+            try:
+                page.wait_for_load_state("networkidle", timeout=30000)
+            except Exception:
+                print("  Network idle timed out on company page.")
+
+            page.wait_for_timeout(5000)
+
             print("  Waiting for company cards...")
-            page.wait_for_selector(".v-card", state="visible", timeout=60000)
+            try:
+                page.wait_for_selector(".v-card", state="visible", timeout=60000)
+            except Exception:
+                debug_dump(page, "company-page-no-cards")
+                raise Exception(
+                    "Company cards not found. Check debug/company-page-no-cards.png"
+                )
             page.wait_for_timeout(3000)  # let all cards render
             print("[STEP 2] Company page loaded.\n")
 
@@ -220,6 +317,8 @@ def scrape_companies():
 
         except Exception as e:
             print(f"\n[ERROR] {e}")
+            if page:
+                debug_dump(page, "error-state")
             print("[ERROR] Cleaning up...")
         finally:
             if page and browser:

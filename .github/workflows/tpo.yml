@@ -1,0 +1,46 @@
+name: TPO Monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 5 * * *"   # Runs at 11:00 AM IST (05:30 UTC)
+
+jobs:
+  run-script:
+    name: Run TPO Automation Script
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright Browsers (Chromium + system deps)
+        run: playwright install --with-deps chromium
+
+      - name: Run Automation Script
+        env:
+          TPO_USERNAME: ${{ secrets.TPO_USERNAME }}
+          TPO_PASSWORD: ${{ secrets.TPO_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python automation.py
+
+      - name: Upload debug artifacts on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots
+          path: debug/
+          if-no-files-found: ignore
+          retention-days: 7
